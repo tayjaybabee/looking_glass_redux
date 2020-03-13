@@ -1,0 +1,4 @@
+PySimpleGUI
+PySimpleGUIQt
+sense_hat
+sense_emu

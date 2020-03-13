@@ -1,0 +1,142 @@
+class ParallelRunAttemptError(Exception):
+    def __init__(self):
+        self.err = 'Polling is already active!'
+        self.message = 'You can not run parallel queries on the same device'
+
+import lib.sense.conf as conf
+import glob
+import PySimpleGUI as qt
+import threading
+import sys
+import time
+from time import sleep
+from os import chdir, getcwd, remove
+from pathlib import Path
+from zipfile import ZipFile
+
+temperature = None
+old_temp = None
+working = False
+verbose = False
+
+if ['-v', '--verbose'] in sys.argv:
+    verbose = True
+
+
+def create_archive(files):
+    global verbose
+    timestr = time.strftime("%Y%m%d-%H%M%S")
+    with ZipFile(f'archive-{timestr}', 'w') as zip:
+        # writing each file one by one
+        for file in files:
+            print(f'Zipping up {file}..')
+            zip.write(file)
+            print(f'Done zipping {file}!')
+
+    for file in files:
+        print(f'Deleting {file}')
+        remove(file)
+        print(f'{file} deleted!')
+
+
+def upkeep():
+    global verbose
+    return_path = getcwd()
+    dir = Path('./logs').absolute()
+    chdir(dir)
+    files = glob.glob('*.log')
+    print(len(files))
+
+
+
+
+
+def read_temp():
+    from os.path import isfile
+
+    file_name = '.cur_temp.tmp'
+    global temperature, old_temp
+
+    old_temp = temperature
+
+    if isfile(file_name):
+        try:
+            with open(file_name, 'r') as file:
+                temp = file.readlines()
+                temp = temp[0]
+                temperature = temp
+                return temp
+        except IndexError as e:
+            return old_temp
+
+
+def main():
+    global old_temp, working
+    upkeep()
+    layout = [
+        [qt.Text('Temperature reading:'), qt.InputText(read_temp(), key='TEMP_OUTPUT', disabled=True)],
+        [qt.Text('Previous Temperature Reading: '), qt.InputText(old_temp, key='OLD_TEMP', disabled=True)],
+        [qt.Text('Run Time:'), qt.InputText('60', visible=False, key='RUN_TIME_INPUT')],
+        [qt.Button('Unload', key='UNLOAD_BUTTON', visible=False),
+         qt.Button('Load', key='LOAD_BUTTON'),
+         qt.Button('Run', visible=False, key='RUN_BUTTON',),
+         qt.Button('Cancel', key='CANCEL_BUTTON')]
+
+    ]
+
+    window = qt.Window('Sample Temp Reading', layout, return_keyboard_events=True)
+
+    loaded = False
+    cancel_disabled = False
+
+    while True:
+        event, values = window.read(timeout=100)
+
+        if not window['RUN_BUTTON'].Visible:
+            if loaded:
+                window['RUN_BUTTON'].Update(visible=True)
+                window['LOAD_BUTTON'].Update(visible=False)
+                window['RUN_TIME_INPUT'].Update(visible=True)
+        else:
+            if not loaded:
+                window['RUN_BUTTON'].Update(visible=False)
+                window['LOAD_BUTTON'].Update(visible=True)
+
+        if working:
+            window['TEMP_OUTPUT'].Update(read_temp())
+            window['OLD_TEMP'].Update(old_temp)
+            if not cancel_disabled:
+                window['CANCEL_BUTTON'].Update(disabled=True)
+        else:
+
+            if cancel_disabled:
+                window['CANCEL_BUTTON'].Update(disabled=False)
+        window.refresh
+
+        if event is None or event == 'CANCEL_BUTTON':
+            window.close()
+            exit()
+
+        if event == 'LOAD_BUTTON':
+            import idk
+            loaded = True
+
+        if event == 'RUN_BUTTON':
+            if not conf.working:
+                working = True
+                conf.working = True
+                worker1 = threading.Thread(target=idk.main, args=[values['RUN_TIME_INPUT'], '--verbose'])
+                worker1.start()
+                work_timer1 = threading.Timer(float(values['RUN_TIME_INPUT']), idk.stop_working)
+                work_timer1.start()
+            else:
+                try:
+                    raise ParallelRunAttemptError()
+                except ParallelRunAttemptError as e:
+                    print(e.err)
+                    print(e.message)
+
+if __name__ == '__main__':
+    main()
+else:
+    print('Importing, but not running main.')
